@@ -2,8 +2,7 @@ resource "aws_instance" "primary" {
   ami           = "ami-0e83be366243f524a"
   instance_type = "t2.micro"
   #running script
-  user_data = "wget -qO- https://raw.githubusercontent.com/gabbyTI/knowledgebase/main/scripts/bash/jenkins-setup.sh | bash"
-
+  user_data = file("../../bash/jenkins-setup.sh")
   tags = {
     "Name" = "Jenkins Server"
   }
