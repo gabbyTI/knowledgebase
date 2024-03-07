@@ -1,7 +1,7 @@
 #!/bin/bash
 #
-# Automate ECommerce Application Deployment
-# Author: Mumshad Mannambeth
+# Automate Installation of Jenkins
+# Author: Gabriel Ibenye
 
 #######################################
 # Print a message in a given color.

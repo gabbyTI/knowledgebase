@@ -2,11 +2,24 @@ resource "aws_instance" "primary" {
   ami           = "ami-0e83be366243f524a"
   instance_type = "t2.micro"
   #running script
+  # user_data     ="${file("../../bash/jenkins-setup.sh")}${file("../../bash/docker-setup.sh")}"
   user_data = file("../../bash/jenkins-setup.sh")
   tags = {
     "Name" = "Jenkins Server"
   }
+  key_name               = aws_key_pair.web.id
+  vpc_security_group_ids = [aws_security_group.primary.id]
+}
 
+resource "aws_instance" "slave1" {
+  ami           = "ami-0e83be366243f524a"
+  instance_type = "t2.micro"
+  #running script
+  user_data = "${file("../../bash/jenkins-slave-setup.sh")}${file("../../bash/docker-setup.sh")}"
+  # user_data = file("../../bash/docker-setup.sh")
+  tags = {
+    "Name" = "Jenkins Slave1"
+  }
   key_name               = aws_key_pair.web.id
   vpc_security_group_ids = [aws_security_group.primary.id]
 }
