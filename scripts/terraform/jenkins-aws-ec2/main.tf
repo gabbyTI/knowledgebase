@@ -61,3 +61,11 @@ resource "aws_security_group" "primary" {
     cidr_blocks = ["0.0.0.0/0"]
   }
 }
+/**
+* Creating node on jenkins
+* First creat a credential to login with username and private key
+* create the private key and public key on the jenkins slave (ssh-keygen)
+* use the private key on the jenkins credential
+* copy and paste the public key into the authorized_keys file (~/.ssh/authorized_keys)
+* in the jenkins credentials select Non verifying Verification Strategy
+*/
