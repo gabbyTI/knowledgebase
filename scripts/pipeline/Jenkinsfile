@@ -28,34 +28,34 @@ pipeline {
 
 ////////////////////////////////////////////////////////
 
-pipeline {
-    agent any
+// pipeline {
+//     agent any
 
-    stages {
+//     stages {
 
-        stage('Checkout Repository') {
-            steps {
-                git url: 'https://github.com/gabbyTI/currency-exchange-microservice.git', branch:'main'
-            }
-        }
+//         stage('Checkout Repository') {
+//             steps {
+//                 git url: 'https://github.com/gabbyTI/currency-exchange-microservice.git', branch:'main'
+//             }
+//         }
 
-        stage('Build Docker Image') {
-            steps {
-                script {
-                    dockerImage = docker.build('gabbyti/currency-exchange:latest', '-f Dockerfile .')
-                }
-            }
-        }
+//         stage('Build Docker Image') {
+//             steps {
+//                 script {
+//                     dockerImage = docker.build('gabbyti/currency-exchange:latest', '-f Dockerfile .')
+//                 }
+//             }
+//         }
 
-        stage('Push Docker Image') {
-            steps {
-                script {
-                    withDockerRegistry([ credentialsId: "dockerHub", url: "" ]){
-                        dockerImage.push()
-                    }
-                }
-            }
-        }
-    }
-}
+//         stage('Push Docker Image') {
+//             steps {
+//                 script {
+//                     withDockerRegistry([ credentialsId: "dockerHub", url: "" ]){
+//                         dockerImage.push()
+//                     }
+//                 }
+//             }
+//         }
+//     }
+// }
 

@@ -63,9 +63,9 @@ resource "aws_security_group" "primary" {
 }
 /**
 * Creating node on jenkins
-* First creat a credential to login with username and private key
-* create the private key and public key on the jenkins slave (ssh-keygen)
-* use the private key on the jenkins credential
-* copy and paste the public key into the authorized_keys file (~/.ssh/authorized_keys)
-* in the jenkins credentials select Non verifying Verification Strategy
+* First create a credential to login with username and private key
+* Create the private key and public key on the jenkins slave (ssh-keygen)
+* Use the private key on the jenkins credential you were creating earlier
+* Copy and paste the public key into the authorized_keys file (~/.ssh/authorized_keys) of the slave server
+* In the jenkins credentials select Non verifying Verification Strategy
 */

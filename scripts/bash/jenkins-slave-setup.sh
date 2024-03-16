@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# Automate Installation of Jenkins
+# Automate Jenkins Slave Node Setup
 # Author: Gabriel Ibenye
 #
 #######################################
