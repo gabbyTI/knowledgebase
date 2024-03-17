@@ -3,13 +3,13 @@ pipeline {
     stages {
         stage('Checkout Repository') {
             steps {
-                git url: 'https://github.com/gabbyTI/currency-conversion-microservice.git', branch:'main'
+                git url: "https://github.com/gabbyTI/currency-conversion-microservice.git", branch:'main'
             }
         }
         stage('Build Docker Image') {
             steps {
                 script {
-                    dockerImage = docker.build('gabbyti/currency-conversion:latest', '-f Dockerfile .')
+                    dockerImage = docker.build("gabbyti/currency-conversion:${BUILD_NUMBER}", '-t gabbyti/currency-conversion:latest -f Dockerfile .')
                 }
             }
         }
@@ -42,7 +42,7 @@ pipeline {
 //         stage('Build Docker Image') {
 //             steps {
 //                 script {
-//                     dockerImage = docker.build('gabbyti/currency-exchange:latest', '-f Dockerfile .')
+//                     dockerImage = docker.build("gabbyti/currency-exchange:${BUILD_NUMBER}", "-t gabbyti/currency-exchange:latest -f Dockerfile .")
 //                 }
 //             }
 //         }
