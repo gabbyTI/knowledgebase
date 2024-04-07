@@ -82,9 +82,9 @@ resource "aws_eks_node_group" "primary" {
   instance_types  = ["t2.micro"]
 
   scaling_config {
-    desired_size = 3 # Specify the desired number of nodes
+    desired_size = 1 # Specify the desired number of nodes
     max_size     = 5 # Specify the maximum number of nodes
-    min_size     = 2 # Specify the minimum number of nodes
+    min_size     = 1 # Specify the minimum number of nodes
   }
 
   depends_on = [
@@ -95,3 +95,10 @@ resource "aws_eks_node_group" "primary" {
 
 }
 
+/** How to connect to cluster
+*
+* aws eks update-kubeconfig --name eks_project
+* kubectl config set-context <context-name>
+*
+*
+*/
