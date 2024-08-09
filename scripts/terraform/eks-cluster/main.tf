@@ -79,7 +79,7 @@ resource "aws_eks_node_group" "primary" {
   node_group_name = "eks-project-node-group"
   node_role_arn   = aws_iam_role.nodegroup.arn
   subnet_ids      = [var.subnet_ids[1]] # Specify the subnet ID(s) where the nodes will be deployed
-  instance_types  = ["t2.micro"]
+  instance_types  = ["m5.large"]
 
   scaling_config {
     desired_size = 1 # Specify the desired number of nodes

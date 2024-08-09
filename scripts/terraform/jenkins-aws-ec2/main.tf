@@ -1,6 +1,6 @@
 resource "aws_instance" "primary" {
   ami           = "ami-0e83be366243f524a"
-  instance_type = "t2.micro"
+  instance_type = "t2.large"
   #running script
   # user_data     ="${file("../../bash/jenkins-setup.sh")}${file("../../bash/docker-setup.sh")}"
   user_data = file("../../bash/jenkins-setup.sh")
