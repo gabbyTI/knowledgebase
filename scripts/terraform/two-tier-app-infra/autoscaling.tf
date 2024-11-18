@@ -1,4 +1,34 @@
 # Auto Scaling Group
+# Launch Template for EC2 Instances
+resource "aws_launch_template" "app" {
+  name_prefix   = "app-launch-template"
+  image_id      = "ami-085f9c64a9b75eed5" # Replace with your region's AMI ID
+  instance_type = "t2.micro"
+  monitoring {
+    enabled = true
+  }
+  # key_name = "your-key" # SSH key to access the EC2 instance
+
+  # iam_instance_profile {
+  #   name = "your-instance-profile"
+  # }
+
+  network_interfaces {
+    associate_public_ip_address = true
+    security_groups             = [aws_security_group.web_sg.id]
+    subnet_id                   = aws_subnet.public[0].id
+  }
+
+  tag_specifications {
+    resource_type = "instance"
+    tags = {
+      Name = "WebServer"
+    }
+  }
+
+  # user_data is base64 value of the ./script file
+  user_data = filebase64("${path.module}/script")
+}
 resource "aws_autoscaling_group" "app_asg" {
   desired_capacity    = 5
   max_size            = 15
