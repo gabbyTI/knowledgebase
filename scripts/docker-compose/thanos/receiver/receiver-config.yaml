@@ -1,0 +1,5 @@
+receive:
+  hashrings:
+    - endpoints:
+        - "thanos-receiver:10901"  # Define the Thanos Receiver endpoint
+

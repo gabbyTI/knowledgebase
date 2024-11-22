@@ -1,0 +1,86 @@
+services:
+  thanos-receiver:
+    container_name: thanos-receiver
+    image: thanosio/thanos:v0.31.0
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 4G
+        reservations:
+          cpus: '1.0'
+          memory: 2G
+    command:
+      - receive
+      - --grpc-address=0.0.0.0:10907  # Use gRPC for communication
+      - --http-address=0.0.0.0:10909  # Optional: Enable HTTP if needed
+      - --remote-write.address=0.0.0.0:10908
+      - --receive.local-endpoint=127.0.0.1:10907
+      - --log.level=debug
+      - --tsdb.path=/data
+      - --receive.hashrings-file=/etc/thanos/hashring.json
+      - --objstore.config-file=/etc/thanos/minio.yaml
+      - --label=receive_replica="01"
+    ports:
+      - "10907:10907"
+      - "10909:10909"
+      - "10908:10908"
+      - "19391:19391"
+    volumes:
+      - ./config/hashring.json:/etc/thanos/hashring.json
+      - ./config/minio.yaml:/etc/thanos/minio.yaml
+      - ./data/receiver:/data
+    networks:
+      - thanos-net
+
+  thanos-store:
+    container_name: thanos-store
+    restart: unless-stopped
+    image: thanosio/thanos:v0.31.0
+    command:
+      - store
+      - --grpc-address=0.0.0.0:10901
+      - --objstore.config-file=/etc/thanos/minio.yaml
+      - --data-dir=/data
+    ports:
+      - "10901:10901"
+    volumes:
+      - ./config/minio.yaml:/etc/thanos/minio.yaml
+      - ./data/store:/data
+    networks:
+      - thanos-net
+
+  thanos-querier:
+    container_name: thanos-querier
+    image: thanosio/thanos:v0.31.0
+    restart: unless-stopped
+    command:
+      - query
+      - --http-address=0.0.0.0:9090
+      - --endpoint=thanos-store:10901
+      - --endpoint=thanos-receiver:10907
+    ports:
+      - "10904:10904"  # Query HTTP port
+      - "9999:9090"
+    networks:
+      - thanos-net
+
+  thanos-query-frontend:
+    container_name: thanos-query-frontend 
+    image: thanosio/thanos:v0.31.0
+    restart: unless-stopped
+    command: 
+      - query-frontend 
+      - --http-address=0.0.0.0:9095
+      - --query-frontend.downstream-url=http://thanos-querier:9090
+      - --log.level=debug 
+    ports: 
+      - "10905:9095" # Query Frontend HTTP port 
+    networks: 
+      - thanos-net
+
+networks:
+  thanos-net:
+    driver: bridge
+

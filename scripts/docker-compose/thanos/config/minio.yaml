@@ -1,0 +1,7 @@
+type: s3
+config:
+  bucket: "default"      # Replace with your actual bucket name
+  endpoint: "192.168.2.237:9000"           # Replace with the MinIO server endpoint if different
+  access_key: "GGNBTRaNe5LTgWySMzW1"    # Replace with your actual access key
+  secret_key: "5Hry1ZeI4t3WqGe8A1ERWyHB2JSGYXgonCXrTFfI"    # Replace with your actual secret key
+  insecure: true     
