@@ -1,0 +1,41 @@
+---
+# Copies systemd unit files uploaded by Packer from the files/systemd/ directory,
+# reloads systemd, and enables + starts each service.
+#
+# Expected variable:
+#   script_root_path  — path where Packer uploaded files/ (default: /tmp)
+#
+# Add your own service names to the `services` list below.
+
+- name: Install and enable application systemd services
+  hosts: all
+  become: true
+
+  vars:
+    systemd_src_dir: "{{ script_root_path | default('/tmp') }}/systemd"
+    services:
+      - myapp-uvicorn          # <-- update with your service names
+      - myapp-celery-worker
+      - myapp-celery-beat
+
+  tasks:
+    - name: Copy systemd unit files
+      ansible.builtin.copy:
+        src: "{{ systemd_src_dir }}/{{ item }}.service"
+        dest: "/etc/systemd/system/{{ item }}.service"
+        owner: root
+        group: root
+        mode: "0644"
+        remote_src: true
+      loop: "{{ services }}"
+
+    - name: Reload systemd daemon
+      ansible.builtin.systemd:
+        daemon_reload: true
+
+    - name: Enable and start services
+      ansible.builtin.systemd:
+        name: "{{ item }}.service"
+        state: started
+        enabled: true
+      loop: "{{ services }}"

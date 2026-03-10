@@ -1,0 +1,56 @@
+---
+# Installs the AWS CloudWatch Agent and configures it to collect
+# CPU, memory, and disk metrics from the instance.
+# Runs early in the build (before app-setup) so metrics are available immediately.
+
+- name: Install and configure CloudWatch Agent
+  hosts: all
+  become: true
+
+  tasks:
+    - name: Set CloudWatch Agent download URL (arm64)
+      ansible.builtin.set_fact:
+        cw_pkg_url: "https://s3.amazonaws.com/amazoncloudwatch-agent/ubuntu/arm64/latest/amazon-cloudwatch-agent.deb"
+      when: ansible_architecture == "aarch64"
+
+    - name: Set CloudWatch Agent download URL (x86_64)
+      ansible.builtin.set_fact:
+        cw_pkg_url: "https://s3.amazonaws.com/amazoncloudwatch-agent/ubuntu/amd64/latest/amazon-cloudwatch-agent.deb"
+      when: ansible_architecture == "x86_64"
+
+    - name: Download CloudWatch Agent
+      ansible.builtin.get_url:
+        url: "{{ cw_pkg_url }}"
+        dest: /tmp/amazon-cloudwatch-agent.deb
+
+    - name: Install CloudWatch Agent
+      ansible.builtin.apt:
+        deb: /tmp/amazon-cloudwatch-agent.deb
+        state: present
+
+    - name: Write CloudWatch Agent config (CPU, memory, disk)
+      ansible.builtin.copy:
+        dest: /opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json
+        content: |
+          {
+            "agent": {
+              "metrics_collection_interval": 60
+            },
+            "metrics": {
+              "namespace": "CWAgent",
+              "append_dimensions": {
+                "InstanceId": "${aws:InstanceId}"
+              },
+              "metrics_collected": {
+                "mem":  { "measurement": ["used_percent"] },
+                "cpu":  { "measurement": ["usage_active"] },
+                "disk": { "measurement": ["used_percent"] }
+              }
+            }
+          }
+
+    - name: Enable and start CloudWatch Agent
+      ansible.builtin.systemd:
+        name: amazon-cloudwatch-agent
+        state: started
+        enabled: true

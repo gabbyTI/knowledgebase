@@ -1,0 +1,82 @@
+---
+# Installs all OS-level system packages and the AWS CLI.
+# Architecture-aware: detects arm64 vs x86_64 and downloads the correct CLI binary.
+
+- name: Install OS-level dependencies
+  hosts: all
+  become: true
+
+  vars:
+    python_version: "3.11"  # ← change this to upgrade Python
+
+  tasks:
+    - name: Update apt cache
+      ansible.builtin.apt:
+        update_cache: true
+
+    - name: Install software-properties-common
+      ansible.builtin.apt:
+        name: software-properties-common
+        state: present
+
+    - name: Add deadsnakes PPA for Python {{ python_version }}
+      ansible.builtin.apt_repository:
+        repo: ppa:deadsnakes/ppa
+        state: present
+        update_cache: true
+
+    - name: Install system packages
+      ansible.builtin.apt:
+        name:
+          - less
+          - curl
+          - unzip
+          - "python{{ python_version }}"
+          - "python{{ python_version }}-venv"
+          - python3-pip
+          - lsof
+          - redis-server
+          - libgl1          # required for OpenCV — remove if not needed
+        state: present
+
+    # ── AWS CLI (architecture-aware) ─────────────────────────────────────────
+
+    - name: Set AWS CLI download URL (aarch64 / arm64)
+      ansible.builtin.set_fact:
+        awscli_url: "https://awscli.amazonaws.com/awscli-exe-linux-aarch64.zip"
+      when: ansible_architecture == "aarch64"
+
+    - name: Set AWS CLI download URL (x86_64)
+      ansible.builtin.set_fact:
+        awscli_url: "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip"
+      when: ansible_architecture == "x86_64"
+
+    - name: Fail on unsupported architecture
+      ansible.builtin.fail:
+        msg: "Unsupported architecture: {{ ansible_architecture }}."
+      when: ansible_architecture not in ["aarch64", "x86_64"]
+
+    - name: Download AWS CLI
+      ansible.builtin.get_url:
+        url: "{{ awscli_url }}"
+        dest: /tmp/awscliv2.zip
+        mode: "0644"
+
+    - name: Unzip AWS CLI
+      ansible.builtin.unarchive:
+        src: /tmp/awscliv2.zip
+        dest: /tmp/
+        remote_src: true
+
+    - name: Install AWS CLI
+      ansible.builtin.command:
+        cmd: /tmp/aws/install
+        creates: /usr/local/bin/aws
+
+    - name: Clean up AWS CLI installer
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - /tmp/awscliv2.zip
+        - /tmp/aws

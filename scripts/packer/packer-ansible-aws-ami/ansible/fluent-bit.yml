@@ -1,0 +1,132 @@
+---
+# Installs Fluent Bit log shipping agent from the official package repository.
+# Configures a main fluent-bit.conf that @INCLUDEs everything in conf.d/*.conf
+# so per-service log configs can be dropped in without modifying the main file.
+#
+# Also installs a systemd path watcher (fluent-bit-reload.path) that automatically
+# restarts Fluent Bit whenever any file in /etc/fluent-bit changes — no manual
+# daemon-reload needed when configs are updated post-deploy.
+
+- name: Install and configure Fluent Bit
+  hosts: all
+  become: true
+
+  vars:
+    fluent_bit_conf: /etc/fluent-bit/fluent-bit.conf
+    conf_d_dir: /etc/fluent-bit/conf.d
+
+  tasks:
+    - name: Install prerequisites
+      ansible.builtin.apt:
+        name:
+          - apt-transport-https
+          - curl
+          - gnupg
+          - software-properties-common
+        state: present
+
+    - name: Add Fluent Bit GPG key
+      ansible.builtin.apt_key:
+        url: https://packages.fluentbit.io/fluentbit.key
+        keyring: /usr/share/keyrings/fluentbit-keyring.gpg
+        state: present
+
+    - name: Add Fluent Bit APT repository
+      ansible.builtin.apt_repository:
+        repo: "deb [signed-by=/usr/share/keyrings/fluentbit-keyring.gpg] https://packages.fluentbit.io/ubuntu/{{ ansible_distribution_release | lower }} {{ ansible_distribution_release | lower }} main"
+        state: present
+        update_cache: true
+
+    - name: Install Fluent Bit
+      ansible.builtin.apt:
+        name: fluent-bit
+        state: present
+
+    - name: Ensure conf.d directory exists
+      ansible.builtin.file:
+        path: "{{ conf_d_dir }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+
+    # A dummy config keeps Fluent Bit from failing on first boot before real configs arrive
+    - name: Create startup dummy config
+      ansible.builtin.copy:
+        dest: "{{ conf_d_dir }}/dummy.conf"
+        owner: root
+        group: root
+        mode: "0644"
+        content: |
+          [INPUT]
+              Name   dummy
+              Tag    init
+              Dummy  {"message": "fluent-bit is running"}
+
+          [OUTPUT]
+              Name   stdout
+              Match  init
+
+    - name: Deploy main fluent-bit.conf (includes all conf.d/*.conf)
+      ansible.builtin.copy:
+        dest: "{{ fluent_bit_conf }}"
+        content: |
+          [SERVICE]
+              Flush        1
+              Daemon       Off
+              Log_Level    info
+              Parsers_File parsers.conf
+
+          # Per-service configs are dropped into conf.d/ and auto-included
+          @INCLUDE conf.d/*.conf
+        owner: root
+        group: root
+        mode: "0644"
+
+    # ── Auto-restart on config change ────────────────────────────────────────
+    - name: Deploy fluent-bit-reload.service (oneshot restart unit)
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/fluent-bit-reload.service
+        content: |
+          [Unit]
+          Description=Restart Fluent Bit on config change
+
+          [Service]
+          Type=oneshot
+          ExecStartPre=/bin/systemctl stop fluent-bit.service
+          ExecStart=/bin/systemctl start fluent-bit.service
+        owner: root
+        group: root
+        mode: "0644"
+
+    - name: Deploy fluent-bit-reload.path (watches /etc/fluent-bit for changes)
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/fluent-bit-reload.path
+        content: |
+          [Unit]
+          Description=Watch Fluent Bit configuration for changes
+
+          [Path]
+          PathModified=/etc/fluent-bit
+          PathModified=/etc/fluent-bit/conf.d
+
+          [Install]
+          WantedBy=multi-user.target
+        owner: root
+        group: root
+        mode: "0644"
+
+    - name: Reload systemd daemon
+      ansible.builtin.command: systemctl daemon-reload
+
+    - name: Enable and start Fluent Bit
+      ansible.builtin.systemd:
+        name: fluent-bit
+        state: started
+        enabled: true
+
+    - name: Enable and start config watcher
+      ansible.builtin.systemd:
+        name: fluent-bit-reload.path
+        state: started
+        enabled: true

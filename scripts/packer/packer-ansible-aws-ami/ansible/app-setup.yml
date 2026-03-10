@@ -1,0 +1,90 @@
+---
+# Clones the application repository, syncs environment files from S3,
+# creates a Python virtualenv, installs dependencies, and runs framework
+# management commands (e.g. Django collectstatic, migrate).
+#
+# Expected extra-vars (passed by Packer):
+#   project_dir_name  — directory the repo is cloned into
+#   s3_bucket_name    — S3 bucket where env files are stored
+#   deploy_env        — "production" | "staging"
+#   github_pat        — GitHub PAT for private repo clone
+#   app_repo          — "owner/repo" format
+
+- name: Clone app, install Python dependencies, and run management commands
+  hosts: all
+  become: true
+
+  vars:
+    python_version: "3.11"   # ← keep in sync with os-dependencies.yml
+    app_home: "/home/ubuntu/{{ project_dir_name }}"
+    venv_python: "/home/ubuntu/{{ project_dir_name }}/venv/bin/python"
+    git_branch: "{{ 'main' if deploy_env == 'production' else 'staging' }}"
+    git_repo_url: "https://{{ github_pat }}@github.com/{{ app_repo }}.git"
+
+  tasks:
+    # ── Clone ─────────────────────────────────────────────────────────────────
+    - name: Clone app repository
+      ansible.builtin.git:
+        repo: "{{ git_repo_url }}"
+        dest: "{{ app_home }}"
+        version: "{{ git_branch }}"
+        force: false
+      become_user: ubuntu
+
+    # ── Ownership ─────────────────────────────────────────────────────────────
+    - name: Set ownership of project directory to ubuntu
+      ansible.builtin.file:
+        path: "{{ app_home }}"
+        owner: ubuntu
+        group: ubuntu
+        recurse: true
+
+    # ── Environment files ─────────────────────────────────────────────────────
+    - name: Sync environment files from S3
+      ansible.builtin.command:
+        cmd: >
+          aws s3 sync
+          s3://{{ s3_bucket_name }}/{{ deploy_env }}/envs
+          {{ app_home }}/envs
+      become_user: ubuntu
+      changed_when: true  # aws s3 sync doesn't signal changes via exit code
+
+    # ── Python virtual environment ────────────────────────────────────────────
+    - name: Create Python {{ python_version }} virtual environment
+      ansible.builtin.command:
+        cmd: "python{{ python_version }} -m venv {{ app_home }}/venv"
+        creates: "{{ app_home }}/venv/bin/activate"
+      become_user: ubuntu
+
+    - name: Install Python dependencies
+      ansible.builtin.pip:
+        requirements: "{{ app_home }}/requirements/production.txt"
+        virtualenv: "{{ app_home }}/venv"
+        virtualenv_python: "python{{ python_version }}"
+      become_user: ubuntu
+
+    # ── Framework management commands ─────────────────────────────────────────
+    # Adjust or remove these tasks to match your framework (Django shown here)
+
+    - name: Run collectstatic
+      ansible.builtin.command:
+        cmd: "{{ venv_python }} {{ app_home }}/manage.py collectstatic --noinput"
+        chdir: "{{ app_home }}"
+      become_user: ubuntu
+
+    - name: Apply database migrations
+      ansible.builtin.command:
+        cmd: "{{ venv_python }} {{ app_home }}/manage.py migrate"
+        chdir: "{{ app_home }}"
+      become_user: ubuntu
+
+    # ── Restart application services ──────────────────────────────────────────
+    # Update service names to match your systemd unit files in services.yml
+    - name: Restart application services
+      ansible.builtin.systemd:
+        name: "{{ item }}.service"
+        state: restarted
+      loop:
+        - myapp-uvicorn          # <-- update with your service names
+        - myapp-celery-worker
+        - myapp-celery-beat

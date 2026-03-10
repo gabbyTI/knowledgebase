@@ -1,0 +1,50 @@
+---
+# Deploys the application-specific Fluent Bit log config into conf.d/.
+# This MUST run after app-setup.yml — the config files live inside the cloned repo.
+#
+# This playbook is separate from fluent-bit.yml to enforce correct ordering
+# in site.yml (agent installed first, app config deployed after the app is cloned).
+#
+# Expected variables:
+#   project_dir_name  — directory the app was cloned into
+#   deploy_env        — "production" | "staging"
+#
+# Adapt the config filenames to match your own Fluent Bit log config structure.
+
+- name: Deploy app-specific Fluent Bit log config
+  hosts: all
+  become: true
+
+  vars:
+    fluent_bit_config_dir: "/home/ubuntu/{{ project_dir_name }}/fluent-bit-logs-config"
+    fluent_bit_conf_d: /etc/fluent-bit/conf.d
+
+  tasks:
+    - name: Assert deploy_env is valid
+      ansible.builtin.assert:
+        that:
+          - deploy_env in ["production", "staging"]
+        fail_msg: "Unknown deploy_env '{{ deploy_env }}'. Expected 'production' or 'staging'."
+
+    - name: Determine environment-specific Fluent Bit config filename
+      ansible.builtin.set_fact:
+        fluent_bit_config_file: "{{ 'myapp-prod-api.conf' if deploy_env == 'production' else 'myapp-staging-api.conf' }}"
+        # <-- update filenames to match your config files in fluent-bit-logs-config/
+
+    - name: Deploy environment-specific Fluent Bit config to conf.d
+      ansible.builtin.copy:
+        src: "{{ fluent_bit_config_dir }}/{{ fluent_bit_config_file }}"
+        dest: "{{ fluent_bit_conf_d }}/myapp-api.conf"   # <-- update dest filename
+        owner: root
+        group: root
+        mode: "0644"
+        remote_src: true
+
+    - name: Deploy Lua date-enrichment script (if used)
+      ansible.builtin.copy:
+        src: "{{ fluent_bit_config_dir }}/lua-scripts/add_date.lua"
+        dest: /etc/fluent-bit/add_date.lua
+        owner: root
+        group: root
+        mode: "0644"
+        remote_src: true

@@ -1,0 +1,13 @@
+# Copy this file to `variables.auto.pkrvars.hcl` and fill in your values.
+# Never commit the real file — add it to .gitignore.
+# In CI, these are written dynamically by the GitHub Actions workflow.
+
+# ─── REQUIRED ──────────────────────────────────────────────────────────────────
+environment      = "staging"          # or "production"
+github_pat       = "YOUR_GITHUB_PAT"  # needs repo read access
+app_repo         = "your-org/your-app-repo"
+
+# ─── OPTIONAL OVERRIDES ────────────────────────────────────────────────────────
+instance_type    = "t4g.small"        # arm64; use t3.small for x86_64
+project_dir_name = "myapp"
+s3_bucket_name   = "myapp-envs-bucket"

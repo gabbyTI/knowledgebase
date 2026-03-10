@@ -1,0 +1,36 @@
+---
+# Master playbook — runs all AMI provisioning steps in order.
+#
+# Required extra-vars (passed by Packer via `extra_arguments`):
+#   project_dir_name  — directory name the app is cloned into (e.g. "myapp")
+#   s3_bucket_name    — S3 bucket where env files are stored
+#   deploy_env        — "production" | "staging"
+#   github_pat        — GitHub Personal Access Token (for private repo clone)
+#   app_repo          — GitHub repo in "owner/repo" format
+#   script_root_path  — path where Packer uploaded files/ (default: /tmp)
+
+- name: Validate required variables
+  hosts: all
+  gather_facts: false
+
+  tasks:
+    - name: Assert all required variables are defined and non-empty
+      ansible.builtin.assert:
+        that:
+          - project_dir_name is defined and project_dir_name | length > 0
+          - app_repo is defined and app_repo | length > 0
+          - s3_bucket_name is defined and s3_bucket_name | length > 0
+          - deploy_env is defined and deploy_env in ["production", "staging"]
+          - github_pat is defined and github_pat | length > 0
+          - script_root_path is defined and script_root_path | length > 0
+        fail_msg: >
+          One or more required variables are missing or invalid.
+          Required: project_dir_name, app_repo, s3_bucket_name,
+          deploy_env (production|staging), github_pat, script_root_path.
+
+# Provisioning order matters — each playbook depends on the previous
+- import_playbook: os-dependencies.yml      # system packages + AWS CLI
+- import_playbook: services.yml             # install + enable systemd services
+- import_playbook: fluent-bit.yml           # install Fluent Bit log agent
+- import_playbook: app-setup.yml            # clone app, install deps, run management commands
+- import_playbook: fluent-bit-app-config.yml # deploy app-specific Fluent Bit config (must be after app-setup)
