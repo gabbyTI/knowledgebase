@@ -1,0 +1,134 @@
+# ============================================================
+# REPO: app-repo
+# FILE: .github/workflows/deploy-stag-prod.yml
+#
+# PURPOSE:
+#   Entry point of the immutable deployment pipeline.
+#   Determines the target environment, opens a Slack thread,
+#   then cross-repo dispatches into the packer-repo to kick
+#   off an AMI build.
+#
+# TRIGGERS:
+#   - Push to main  → production deployment
+#   - Push to staging → staging deployment
+#   - Manual dispatch → choose environment + dry_run option
+#
+# REQUIRED SECRETS:
+#   - PERSONAL_ACCESS_TOKEN  : GitHub PAT with repo + workflow scopes
+#   - SLACK_BOT_TOKEN        : Slack bot token
+#
+# REQUIRED VARIABLES:
+#   - SLACK_CHANNEL_ID       : Slack channel to post notifications to
+# ============================================================
+
+name: Staging And Production Deployment Workflow
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Specify the deployment environment"
+        required: true
+        type: choice
+        options: [staging, production]
+      dry_run:
+        description: "Dry run mode (plan only, no actual deployment)"
+        required: false
+        type: boolean
+        default: false
+  push:
+    branches:
+      - main
+      - staging
+
+jobs:
+  determine-environment:
+    name: Determine Environment
+    runs-on: ubuntu-latest
+    outputs:
+      environment: ${{ steps.determine_env.outputs.environment }}
+    steps:
+      - name: Determine Environment
+        id: determine_env
+        run: |
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            ENVIRONMENT="${{ github.event.inputs.environment }}"
+          elif [ "${{ github.ref_name }}" == "main" ]; then
+            ENVIRONMENT="production"
+          elif [ "${{ github.ref_name }}" == "staging" ]; then
+            ENVIRONMENT="staging"
+          else
+            echo "This workflow is only active for 'main' and 'staging' branches."
+            exit 1
+          fi
+          echo "environment=$ENVIRONMENT" >> $GITHUB_OUTPUT
+
+  slack-init:
+    name: Start Deployment Slack Thread
+    runs-on: ubuntu-latest
+    needs: determine-environment
+    outputs:
+      thread_ts: ${{ steps.slack_init.outputs.ts }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Send Slack deployment start message
+        id: slack_init
+        uses: ./.github/actions/slack-post-message
+        with:
+          token: ${{ secrets.SLACK_BOT_TOKEN }}
+          channel: ${{ vars.SLACK_CHANNEL_ID }}
+          message: |
+            :eyes: ${{ needs.determine-environment.outputs.environment }} deployment started
+            Branch: `${{ github.ref_name }}`
+            Triggered by: `${{ github.actor }}`
+            Mode: `${{ github.event.inputs.dry_run == 'true' && 'DRY RUN' || 'FULL BUILD' }}`
+
+  trigger-packer:
+    name: Trigger Packer Repository Workflow
+    runs-on: ubuntu-latest
+    needs:
+      - determine-environment
+      - slack-init
+    steps:
+      - name: Trigger Packer Repository Workflow
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
+          script: |
+            await github.rest.actions.createWorkflowDispatch({
+              owner: '${{ github.repository_owner }}',
+              repo: 'your-packer-repo',           # <-- replace with your packer repo name
+              workflow_id: 'build-ami.yml',        # <-- replace with your packer workflow filename
+              ref: 'main',
+              inputs: {
+                environment:      '${{ needs.determine-environment.outputs.environment }}',
+                app_repo:         '${{ github.repository }}',
+                thread_ts:        '${{ needs.slack-init.outputs.thread_ts }}',
+                dry_run:          '${{ github.event.inputs.dry_run || false }}',
+                slack_token:      '${{ secrets.SLACK_BOT_TOKEN }}'
+              }
+            });
+
+  notify-slack-failure:
+    name: Notify Slack on Failure
+    runs-on: ubuntu-latest
+    needs:
+      - determine-environment
+      - slack-init
+      - trigger-packer
+    if: ${{ failure() }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Update Slack message on failure
+        uses: ./.github/actions/slack-update-message
+        with:
+          token: ${{ secrets.SLACK_BOT_TOKEN }}
+          channel: ${{ vars.SLACK_CHANNEL_ID }}
+          ts: ${{ needs.slack-init.outputs.thread_ts }}
+          text: |
+            :x: ${{ needs.determine-environment.outputs.environment }} deployment failed!
+            Branch: ${{ github.ref_name }}
+            Triggered by: ${{ github.actor }}
+            Mode: `${{ github.event.inputs.dry_run == 'true' && 'DRY RUN' || 'FULL BUILD' }}`
+            See details: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}

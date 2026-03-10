@@ -1,0 +1,177 @@
+# ============================================================
+# REPO: packer-repo
+# FILE: .github/workflows/build-ami.yml
+#
+# PURPOSE:
+#   Receives a cross-repo dispatch from the app-repo.
+#   Validates and builds an AWS AMI using HashiCorp Packer
+#   with the application pre-installed inside it.
+#   On success, cross-repo dispatches into the infra-repo
+#   to apply Terraform with the new AMI.
+#
+# TRIGGERS:
+#   - workflow_dispatch only (triggered by app-repo, not manually in normal flow)
+#
+# REQUIRED SECRETS:
+#   - PERSONAL_ACCESS_TOKEN  : GitHub PAT with repo + workflow scopes
+#   - SLACK_BOT_TOKEN        : Fallback Slack bot token (passed from app-repo normally)
+#
+# REQUIRED VARIABLES:
+#   - AWS_ACCOUNT_ID         : AWS account ID (used in OIDC role ARN)
+#   - AWS_DEFAULT_REGION     : AWS region to build the AMI in
+#   - SLACK_CHANNEL_ID       : Slack channel ID for notifications
+#   - SOURCE_AMI             : Base AMI ID to build from (e.g. Ubuntu 22.04 arm64)
+#   - INSTANCE_TYPE          : EC2 instance type for the Packer build (e.g. t4g.small)
+#   - DEPLOYMENT_DIR_NAME    : Directory name for the app inside the AMI
+#   - S3_BUCKET_NAME         : S3 bucket name for environment files
+#
+# AWS AUTH:
+#   Uses OIDC — no static credentials needed. Requires an IAM role
+#   trusted by GitHub Actions (github.com Actions OIDC provider).
+# ============================================================
+
+name: Build App AWS AMI
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Deployment environment (staging or production)"
+        required: true
+        type: choice
+        options: [staging, production]
+      app_repo:
+        description: "GitHub repository of the app (owner/repo)"
+        required: true
+        type: string
+      dry_run:
+        description: "Validate only — do not build the AMI"
+        required: false
+        type: boolean
+        default: false
+      thread_ts:
+        description: "Slack thread timestamp (passed from app-repo)"
+        required: false
+        type: string
+      slack_token:
+        description: "Slack bot token (passed from app-repo)"
+        required: false
+        type: string
+
+jobs:
+  notify-start:
+    name: Notify Workflow Start
+    if: ${{ inputs.thread_ts != '' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Slack — AMI Build Started
+        uses: ./.github/actions/slack-update-thread
+        with:
+          token: ${{ inputs.slack_token || secrets.SLACK_BOT_TOKEN }}
+          channel: ${{ vars.SLACK_CHANNEL_ID }}
+          thread_ts: ${{ inputs.thread_ts }}
+          text: |
+            :rocket: AMI Build Workflow Started
+            Environment: `${{ inputs.environment }}`
+            Mode: `${{ inputs.dry_run && 'DRY RUN (Validation Only)' || 'FULL BUILD' }}`
+
+  build-ami:
+    name: Validate and Build AMI
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write   # Required for OIDC
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ vars.AWS_ACCOUNT_ID }}:role/GithubOICD
+          aws-region: ${{ vars.AWS_DEFAULT_REGION }}
+
+      - name: Setup Packer
+        uses: hashicorp/setup-packer@v3
+
+      - name: Validate Packer Template
+        working-directory: your-packer-template-dir   # <-- replace with your Packer template directory
+        run: |
+          # Write Packer variable file from GitHub variables/secrets
+          cat > variables.auto.pkrvars.hcl << EOF
+          github_pat        = "${{ secrets.PERSONAL_ACCESS_TOKEN }}"
+          environment       = "${{ inputs.environment }}"
+          app_repo          = "${{ inputs.app_repo }}"
+          source_ami        = "${{ vars.SOURCE_AMI }}"
+          instance_type     = "${{ vars.INSTANCE_TYPE }}"
+          deployment_dir    = "${{ vars.DEPLOYMENT_DIR_NAME }}"
+          s3_bucket_name    = "${{ vars.S3_BUCKET_NAME }}"
+          EOF
+
+          packer init . && packer validate .
+
+      - name: Build AMI with Packer
+        if: ${{ !inputs.dry_run }}
+        working-directory: your-packer-template-dir   # <-- replace with your Packer template directory
+        run: packer init . && packer build .
+
+  trigger-infra-deploy:
+    name: Trigger Infrastructure Deploy Workflow
+    needs: build-ami
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger infra-repo workflow
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
+          script: |
+            await github.rest.actions.createWorkflowDispatch({
+              owner: '${{ github.repository_owner }}',
+              repo: 'your-infra-repo',              # <-- replace with your infra repo name
+              workflow_id: 'deploy-infra.yml',       # <-- replace with your infra workflow filename
+              ref: 'main',
+              inputs: {
+                environment:  '${{ inputs.environment }}',
+                thread_ts:    '${{ inputs.thread_ts }}',
+                slack_token:  '${{ inputs.slack_token || secrets.SLACK_BOT_TOKEN }}',
+                dry_run:      '${{ inputs.dry_run }}'
+              }
+            });
+
+  notify-success:
+    name: Notify AMI Build Success
+    needs: trigger-infra-deploy
+    if: ${{ success() && inputs.thread_ts != '' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Slack — AMI Build Success
+        uses: ./.github/actions/slack-update-thread
+        with:
+          token: ${{ inputs.slack_token || secrets.SLACK_BOT_TOKEN }}
+          channel: ${{ vars.SLACK_CHANNEL_ID }}
+          thread_ts: ${{ inputs.thread_ts }}
+          text: |
+            :white_check_mark: AMI Build Completed Successfully
+            Environment: `${{ inputs.environment }}`
+            Mode: `${{ inputs.dry_run && 'DRY RUN (Validation Only)' || 'FULL BUILD' }}`
+
+  notify-failure:
+    name: Notify AMI Build Failure
+    needs: trigger-infra-deploy
+    if: ${{ failure() && inputs.thread_ts != '' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Slack — AMI Build Failed
+        uses: ./.github/actions/slack-update-message
+        with:
+          token: ${{ inputs.slack_token || secrets.SLACK_BOT_TOKEN }}
+          channel: ${{ vars.SLACK_CHANNEL_ID }}
+          ts: ${{ inputs.thread_ts }}
+          text: |
+            :x: *Deployment Failed at AMI Build Step!*
+            Environment: `${{ inputs.environment }}`
+            Mode: `${{ inputs.dry_run && 'DRY RUN' || 'FULL BUILD' }}`
+            Actor: `${{ github.actor }}`
+            Check details: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}

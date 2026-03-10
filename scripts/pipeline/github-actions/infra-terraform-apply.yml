@@ -1,0 +1,184 @@
+# ============================================================
+# REPO: infra-repo
+# FILE: .github/workflows/deploy-infra.yml
+#
+# PURPOSE:
+#   Final stage of the immutable deployment pipeline.
+#   Receives a cross-repo dispatch from the packer-repo
+#   after a new AMI has been successfully built.
+#   Runs Terraform to spin up a new EC2 from the new AMI
+#   and updates DNS records.
+#
+#   Uses targeted Terraform apply (-target) to scope changes
+#   to only the app-related resources — shared infrastructure
+#   (VPCs, databases, etc.) is never touched.
+#
+# TRIGGERS:
+#   - workflow_dispatch only (triggered by packer-repo, not manually in normal flow)
+#
+# REQUIRED SECRETS:
+#   - SLACK_BOT_TOKEN        : Fallback Slack bot token
+#
+# REQUIRED VARIABLES:
+#   - AWS_ACCOUNT_ID         : AWS account ID (used in OIDC role ARN)
+#   - AWS_DEFAULT_REGION     : AWS region
+#   - SLACK_CHANNEL_ID       : Slack channel ID for notifications
+#
+# DIRECTORY STRUCTURE EXPECTED:
+#   environments/
+#     staging/
+#       main.tf, variables.tf, outputs.tf, backend.tf ...
+#     production/
+#       main.tf, variables.tf, outputs.tf, backend.tf ...
+#
+# AWS AUTH:
+#   Uses OIDC — no static credentials needed.
+#
+# BRANCH SAFETY:
+#   A reusable check-branch workflow enforces that this
+#   workflow only runs from the main branch, even when
+#   triggered cross-repo.
+# ============================================================
+
+name: Deploy App Infrastructure
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Deployment environment (staging or production)"
+        required: true
+        type: choice
+        options: [staging, production]
+      thread_ts:
+        description: "Slack thread timestamp (passed from packer-repo)"
+        required: false
+        type: string
+      slack_token:
+        description: "Slack bot token (passed from packer-repo)"
+        required: false
+        type: string
+      dry_run:
+        description: "Plan only — do not apply Terraform changes"
+        required: false
+        type: boolean
+        default: false
+
+jobs:
+  check-branch:
+    # Safety guard: only allow infra deployments from the main branch
+    uses: ./.github/workflows/check-branch.yml
+    with:
+      required_branch: "main"
+
+  notify-start:
+    name: Notify Workflow Start
+    if: ${{ inputs.thread_ts != '' }}
+    needs: check-branch
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Slack — Infra Deploy Started
+        uses: ./.github/actions/slack-update-thread
+        with:
+          token: ${{ inputs.slack_token || secrets.SLACK_BOT_TOKEN }}
+          channel: ${{ vars.SLACK_CHANNEL_ID }}
+          thread_ts: ${{ inputs.thread_ts }}
+          text: |
+            :rocket: Infrastructure Deployment Started
+            Environment: `${{ inputs.environment }}`
+            Mode: `${{ inputs.dry_run && 'DRY RUN (PLAN ONLY)' || 'FULL BUILD' }}`
+
+  deploy:
+    name: Apply Terraform
+    needs: check-branch
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Configure AWS credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ vars.AWS_ACCOUNT_ID }}:role/GithubOICD
+          aws-region: ${{ vars.AWS_DEFAULT_REGION }}
+
+      - name: Initialize Terraform backend
+        working-directory: environments/${{ inputs.environment }}
+        run: terraform init
+
+      - name: Plan Terraform (targeted)
+        working-directory: environments/${{ inputs.environment }}
+        run: |
+          terraform plan -refresh=false \
+            -target=data.aws_ami.my_app \               # data source to look up the latest AMI
+            -target=module.my-app-backend \             # EC2 module for the app server
+            -target=data.aws_route53_zone.selected \    # Route53 zone data source
+            -target=aws_route53_record.api \            # A record
+            -target=aws_route53_record.api_ipv6 \       # AAAA record
+            -target=aws_acm_certificate.${{ inputs.environment }}_cert  # ACM TLS cert
+
+      - name: Apply Terraform (targeted)
+        if: ${{ !inputs.dry_run }}
+        working-directory: environments/${{ inputs.environment }}
+        run: |
+          terraform apply -auto-approve -refresh=false \
+            -target=data.aws_ami.my_app \
+            -target=module.my-app-backend \
+            -target=data.aws_route53_zone.selected \
+            -target=aws_route53_record.api \
+            -target=aws_route53_record.api_ipv6 \
+            -target=aws_acm_certificate.${{ inputs.environment }}_cert
+        env:
+          TF_IN_AUTOMATION: true
+
+      - name: Capture Terraform outputs
+        if: ${{ !inputs.dry_run }}
+        working-directory: environments/${{ inputs.environment }}
+        run: |
+          echo "API URL: https://$(terraform output -raw app_fqdn)"
+        env:
+          TF_IN_AUTOMATION: true
+
+  notify-success:
+    name: Notify Deployment Success
+    needs: deploy
+    if: ${{ success() && inputs.thread_ts != '' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Slack — Deployment Success
+        uses: ./.github/actions/slack-update-message   # edits the top-level message, not a reply
+        with:
+          token: ${{ inputs.slack_token || secrets.SLACK_BOT_TOKEN }}
+          channel: ${{ vars.SLACK_CHANNEL_ID }}
+          ts: ${{ inputs.thread_ts }}
+          text: |
+            :white_check_mark: Deployment Completed Successfully
+            Environment: `${{ inputs.environment }}`
+            Mode: `${{ inputs.dry_run && 'DRY RUN' || 'FULL BUILD' }}`
+            Actor: `${{ github.actor }}`
+            Check details: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
+  notify-failure:
+    name: Notify Deployment Failure
+    needs: deploy
+    if: ${{ failure() && inputs.thread_ts != '' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Slack — Deployment Failed
+        uses: ./.github/actions/slack-update-message   # edits the top-level message, not a reply
+        with:
+          token: ${{ inputs.slack_token || secrets.SLACK_BOT_TOKEN }}
+          channel: ${{ vars.SLACK_CHANNEL_ID }}
+          ts: ${{ inputs.thread_ts }}
+          text: |
+            :x: *Deployment Failed!*
+            Environment: `${{ inputs.environment }}`
+            Mode: `${{ inputs.dry_run && 'DRY RUN' || 'FULL BUILD' }}`
+            Actor: `${{ github.actor }}`
+            Check details: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
