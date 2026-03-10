@@ -24,21 +24,21 @@ A **single Slack thread** is created at the start of the pipeline and updated ac
 
 ```mermaid
 flowchart TD
-    A["Push to main / staging\nOR manual workflow_dispatch\n[app-repo]"] --> B["determine-environment\nReads branch or manual input"]
-    B --> C["slack-init\n📣 Posts Slack message\nCaptures thread_ts"]
-    C --> D["trigger-packer\n🔑 Cross-repo dispatch via PAT\nPasses: environment, thread_ts, dry_run, slack_token"]
+    A["Push to main / staging<br/>OR manual workflow_dispatch<br/>app-repo"] --> B["determine-environment<br/>Reads branch or manual input"]
+    B --> C["slack-init<br/>📣 Posts Slack message<br/>Captures thread_ts"]
+    C --> D["trigger-packer<br/>🔑 Cross-repo dispatch via PAT<br/>Passes: environment, thread_ts, dry_run, slack_token"]
 
-    D --> E["[packer-repo]\nnotify-start → updates Slack thread"]
-    E --> F["build-ami\n✅ packer validate always\n🖼️ packer build if not dry_run\nBakes AMI with app pre-installed"]
-    F --> G["trigger-infra-deploy\n🔑 Cross-repo dispatch via PAT\nPasses: environment, thread_ts, dry_run, slack_token"]
-    G --> H["notify-success/failure → updates Slack thread"]
+    D --> E["packer-repo<br/>notify-start → updates Slack thread"]
+    E --> F["build-ami<br/>✅ packer validate always<br/>🖼️ packer build if not dry_run<br/>Bakes AMI with app pre-installed"]
+    F --> G["trigger-infra-deploy<br/>🔑 Cross-repo dispatch via PAT<br/>Passes: environment, thread_ts, dry_run, slack_token"]
+    G --> H["notify-success/failure<br/>updates Slack thread"]
 
-    G --> I["[infra-repo]\ncheck-branch → enforce main only"]
-    I --> J["notify-start → updates Slack thread"]
-    J --> K["Terraform init + plan\nTargeted: new AMI, EC2 module, Route53, ACM cert"]
-    K --> L["terraform apply -auto-approve\nif not dry_run\n🌍 New EC2 spun up from new AMI\nDNS updated"]
-    L --> M["✅ notify-success\nEdits top-level Slack message\nDeployment Complete"]
-    K -- failure --> N["❌ notify-failure\nEdits top-level Slack message"]
+    G --> I["infra-repo<br/>check-branch → enforce main only"]
+    I --> J["notify-start<br/>updates Slack thread"]
+    J --> K["Terraform init + plan<br/>Targeted: new AMI, EC2 module, Route53, ACM cert"]
+    K --> L["terraform apply -auto-approve<br/>if not dry_run<br/>🌍 New EC2 spun up from new AMI<br/>DNS updated"]
+    L --> M["✅ notify-success<br/>Edits top-level Slack message<br/>Deployment Complete"]
+    K -- failure --> N["❌ notify-failure<br/>Edits top-level Slack message"]
 ```
 
 ---
